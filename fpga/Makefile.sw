@@ -8,7 +8,7 @@ SW_PATH = $(abspath ../../sw)
 # SW_PATH = $(HOME)/build-dir/boom-sw
 
 
-config_prefix ?= notset
+config_prefix ?= emu
 
 $(SW_PATH):
 	@echo "Do you want to put all software repos under $(SW_PATH) (You can modify 'SW_PATH' in Makefile.sw)? [y/n]"

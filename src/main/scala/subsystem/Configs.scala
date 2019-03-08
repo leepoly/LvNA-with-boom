@@ -130,6 +130,7 @@ class With1TinyCore extends Config((site, here, up) => {
 
 class WithNBanksPerMemChannel(n: Int) extends Config((site, here, up) => {
   case BankedL2Key => up(BankedL2Key, site).copy(nBanksPerChannel = n)
+  case NBanksPerMemChannel => n
 })
 
 class WithNTrackersPerBank(n: Int) extends Config((site, here, up) => {

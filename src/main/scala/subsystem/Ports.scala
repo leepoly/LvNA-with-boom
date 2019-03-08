@@ -160,9 +160,6 @@ trait CanHaveMasterAXI4MemPort { this: BaseSubsystem =>
       beatBytes = params.beatBytes)
   })
 
-  val l2cache: TLSimpleL2Cache = if (p(NL2CacheCapacity) != 0) TLSimpleL2CacheRef() else null
-  private val l2node = if (p(NL2CacheCapacity) != 0) l2cache.node else TLSimpleL2Cache()
-
   memPortParamsOpt.foreach { params =>
     memBuses.map { m =>
        memAXI4Node := m.toDRAMController(Some(portName)) {

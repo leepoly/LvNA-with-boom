@@ -19,6 +19,7 @@ case object ProcDSidWidth extends Field[Int](3)
 trait HasControlPlaneParameters {
   implicit val p: Parameters
   val nTiles = p(NTiles)
+  val nL2Banks = p(NBanksPerMemChannel)
   val ldomDSidWidth = log2Up(nTiles)
   val procDSidWidth = p(ProcDSidWidth)
   val dsidWidth = ldomDSidWidth + procDSidWidth
@@ -163,7 +164,7 @@ with HasTokenBucketParameters
       val memBases  = Vec(nTiles, UInt(memAddrWidth.W)).asOutput
       val memMasks  = Vec(nTiles, UInt(memAddrWidth.W)).asOutput
       val pc        = Vec(nTiles, UInt(instAddrWidth.W)).asInput
-      val l2        = new CPToL2CacheIO()
+      val l2        = Vec(nL2Banks, new CPToL2CacheIO())
       val cp        = new ControlPlaneIO()
     })
 
@@ -179,16 +180,18 @@ with HasTokenBucketParameters
     }))
     val memMasks  = RegInit(Vec(Seq.fill(nTiles)(~0.U(memAddrWidth.W))))
     val waymasks  = RegInit(Vec(Seq.fill(nTiles){ ((1L << p(NL2CacheWays)) - 1).U }))
-    val l2dsid_reg = RegNext(io.l2.dsid)  // 1 cycle delay
-    io.l2.waymask := waymasks(l2dsid_reg)
+    val l2dsid_reg = io.l2.map(l2 => RegNext(l2.dsid))  // 1 cycle delay
+    for (i <- 0 until nL2Banks)
+      io.l2(i).waymask := waymasks(l2dsid_reg(i))
 
     val currDsid = RegEnable(io.cp.updateData, 0.U, io.cp.dsidSelWen)
     io.cp.dsidSel := currDsid
     io.cp.waymask := waymasks(currDsid)
     io.cp.traffic := bucketState(currDsid).traffic
     io.cp.cycle := timer
-    io.cp.capacity := io.l2.capacity
-    io.l2.capacity_dsid := currDsid
+    io.cp.capacity := io.l2(0).capacity
+    for (i <- 0 until nL2Banks)
+      io.l2(i).capacity_dsid := currDsid
 
     io.cp.hartDsid := hartDsids(hartSel)
     io.cp.hartSel := hartSel
@@ -488,12 +491,13 @@ trait HasControlPlaneBoomModuleImpl extends HasBoomTilesModuleImp {
 trait BindL2WayMask extends HasRocketTiles {
   this: BaseSubsystem with HasControlPlane with CanHaveMasterAXI4MemPort =>
   val _cp = controlPlane
-  val _l2 = l2cache
+  val _l2 = l2caches
 }
 
 trait BindL2WayMaskModuleImp extends HasRocketTilesModuleImp {
   val outer: BindL2WayMask
   if (p(NL2CacheCapacity) != 0) {
-    outer._l2.module.cp <> outer._cp.module.io.l2
+    for (bank <- 0 until p(NBanksPerMemChannel))
+      outer._l2(bank).module.cp <> outer._cp.module.io.l2(bank)
   }
 }

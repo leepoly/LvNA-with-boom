@@ -26,22 +26,25 @@ class LvNABoomLinuxConfig extends Config(
     ++ new WithSmallBooms
     ++ new DefaultBoomConfig
     ++ new WithNBoomCores(1)
-    ++ new WithNL2CacheCapacity(0)
+    ++ new WithNBanksPerMemChannel(4)
+    ++ new WithNL2CacheCapacity(256)
     ++ new WithEmu
     ++ new WithBoom
     ++ new WithRationalRocketTiles
-    ++ new WithExtMemSize(0x8000000L) // 32MB
+    ++ new WithExtMemSize(0x800000L) // 8MB
     ++ new WithNoMMIOPort
     ++ new WithJtagDTM
     ++ new WithDebugSBA
-    ++ new BaseBoomConfig)
+    ++ new BaseBoomConfig
+    )
 
 class LvNABoomTestConfig extends Config(
   new WithRVC
     ++ new WithSmallBooms
     ++ new DefaultBoomConfig
     ++ new WithNBoomCores(1)
-    ++ new WithNL2CacheCapacity(0)
+    ++ new WithNBanksPerMemChannel(4)
+    ++ new WithNL2CacheCapacity(256)
     ++ new WithEmu
     ++ new WithBoom
     ++ new WithRationalRocketTiles
@@ -71,12 +74,13 @@ class LvNABoomFPGAConfigzcu102 extends Config(
   new WithRVC
   ++ new WithSmallBooms
   ++ new DefaultBoomConfig
-  ++ new WithNL2CacheCapacity(0)
+  ++ new WithNL2CacheCapacity(2048)
+  ++ new WithNBanksPerMemChannel(4)
   ++ new WithBoom
   ++ new WithNBoomCores(1)
   ++ new WithRationalRocketTiles
   ++ new WithTimebase(BigInt(10000000)) // 10 MHz
-  ++ new WithExtMemSize(0x100000000L)
+  ++ new WithExtMemSize(0x80000000L)
   ++ new WithJtagDTM
   ++ new WithDebugSBA
   ++ new BaseBoomFPGAConfig)

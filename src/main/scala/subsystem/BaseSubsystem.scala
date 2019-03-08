@@ -60,13 +60,18 @@ abstract class BaseSubsystem(implicit p: Parameters) extends BareSubsystem {
   require (isPow2(nMemoryChannels) || nMemoryChannels == 0)
   require (isPow2(nBanksPerChannel))
   require (isPow2(memBusBlockBytes))
-
+  
+  val l2caches = (0 until nBanks).map { bankid => 
+      if (p(NL2CacheCapacity) != 0) TLSimpleL2CacheRef(bankid) else null
+  }
+  private val l2nodes = l2caches.map( l2cache => if (l2cache == null) null else l2cache.node)
+  println(s"BaseSubsystem: nMemoryChannels=$nMemoryChannels, nBankPerChannel=$nBanksPerChannel , nBanks=$nBanks")
   val memBuses = Seq.tabulate(nMemoryChannels) { channel =>
     val mbus = LazyModule(new MemoryBus(mbusParams, channel, nMemoryChannels, nBanks)(p))
     for (bank <- 0 until nBanksPerChannel) {
       ForceFanout(a = true) { implicit p => sbus.toMemoryBus { in } }
       mbus.coupleFrom(s"coherence_manager_bank_$bank") {
-        _ := TLFilter(TLFilter.mSelectIntersect(mbus.bankFilter(bank))) := out
+        _ := l2nodes(bank) := TLFilter(TLFilter.mSelectIntersect(mbus.bankFilter(bank))) := out
       }
     }
     mbus

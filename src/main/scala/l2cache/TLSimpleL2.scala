@@ -16,8 +16,13 @@ import freechips.rocketchip.tilelink._
 import lvna.{HasControlPlaneParameters, CPToL2CacheIO}
 
 case class TLL2CacheParams(
-  debug: Boolean = false
+  debug: Boolean = true //false
 )
+
+trait L2CacheParams1 {
+  val blockSize: Int = 64 * 8
+  val blockBytes: Int = blockSize / 8
+}
 
 class MetadataEntry(tagBits: Int, dsidWidth: Int) extends Bundle {
   val valid = Bool()
@@ -28,18 +33,40 @@ class MetadataEntry(tagBits: Int, dsidWidth: Int) extends Bundle {
   override def cloneType = new MetadataEntry(tagBits, dsidWidth).asInstanceOf[this.type]
 }
 
+class L2CacheReq(params: TLBundleParameters, dsidWidth: Int) extends Bundle with L2CacheParams1{
+  val opcode = UInt(OUTPUT, 3.W)
+  val dsid = UInt(OUTPUT, width = dsidWidth.W)
+  val param = UInt(OUTPUT, 0)
+  val size = UInt(OUTPUT, width = log2Up(log2Ceil(params.dataBits / 8) + log2Ceil(64 * 8 / params.dataBits)).W)
+  val source = UInt(OUTPUT, width = params.sourceBits.W)
+  val address = UInt(OUTPUT, width = params.addressBits.W)
+  val mask = UInt(OUTPUT, 16.W) //need improve
+  val data = Vec(blockSize / params.dataBits, UInt(OUTPUT, params.dataBits.W))
+}
+
+class TL2Cache(params: TLBundleParameters, dsidWidth: Int) extends Module {
+  val io = new Bundle {
+    val in = new TLBundleSnoop(params)
+    val out = new L2CacheReq(params, dsidWidth)
+  }
+
+
+}
+
 // ============================== DCache ==============================
-class TLSimpleL2Cache(param: TLL2CacheParams)(implicit p: Parameters) extends LazyModule
+class TLSimpleL2Cache(bankid: Int, param: TLL2CacheParams)(implicit p: Parameters) extends LazyModule
 with HasControlPlaneParameters
 {
   val node = TLAdapterNode(
-    clientFn = { c => c.copy(clients = c.clients map { c2 => c2.copy(sourceId = IdRange(0, 1))} )}
+    //clientFn = { c => c.copy(clients = c.clients map { c2 => c2.copy(sourceId = IdRange(0, 1))} )}
   )
 
   lazy val module = new LazyModuleImp(this) {
+    println(s"bankid=$bankid")
     val nWays = p(NL2CacheWays)
     println(s"nWays = $nWays")
-    val nSets = p(NL2CacheCapacity) * 1024 / 64 / nWays
+    val nBanks = p(NBanksPerMemChannel)
+    val nSets = p(NL2CacheCapacity) * 1024 / 64 / nWays / nBanks
     println(s"nSets = $nSets")
     val cp = IO(new CPToL2CacheIO().flip())
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
@@ -78,13 +105,17 @@ with HasControlPlaneParameters
 
       val indexBits = log2Ceil(nSets)
       val blockOffsetBits = log2Ceil(blockBytes)
-      val tagBits = addrWidth - indexBits - blockOffsetBits
+      val bankBits = log2Ceil(nBanks)
+      val tagBits = addrWidth - indexBits - blockOffsetBits - bankBits
       val offsetLSB = 0
       val offsetMSB = blockOffsetBits - 1
-      val indexLSB = offsetMSB + 1
+      val bankLSB = offsetMSB + 1
+      val bankMSB = bankLSB + bankBits - 1
+      val indexLSB = bankMSB + 1
       val indexMSB = indexLSB + indexBits - 1
       val tagLSB = indexMSB + 1
       val tagMSB = tagLSB + tagBits - 1
+      println(s"tag$tagMSB-$tagLSB index$indexMSB-$indexLSB bank$bankMSB-$bankLSB offset$offsetMSB-$offsetLSB")
 
       val rst_cnt = RegInit(0.asUInt(log2Up(2 * nSets + 1).W))
       val rst = (rst_cnt < UInt(2 * nSets)) && !reset.toBool
@@ -104,7 +135,7 @@ with HasControlPlaneParameters
       // write miss writeback : s_idle -> s_gather_write_data ->  s_send_bresp -> s_tag_read -> s_data_read -> s_wait_ram_awready -> s_do_ram_write -> s_wait_ram_bresp
       //                               -> s_wait_ram_arready -> s_do_ram_read -> s_merge_put_data -> s_data_write -> s_update_meta -> s_idle
       val timer = GTimer()
-      val log_prefix = "cycle: %d [L2Cache] state %x "
+      val log_prefix = "cycle: %d bankid: %d [L2Cache] state %x "
       def log_raw(prefix: String, fmt: String, tail: String, args: Bits*) = {
         if (param.debug) {
           printf(prefix + fmt + tail, args:_*)
@@ -112,9 +143,9 @@ with HasControlPlaneParameters
       }
 
       /** Single log */
-      def log(fmt: String, args: Bits*) = log_raw(log_prefix, fmt, "\n", timer +: state +: args:_*)
+      def log(fmt: String, args: Bits*) = log_raw(log_prefix, fmt, "\n", timer +: bankid.U +: state +: args:_*)
       /** Log with line continued */
-      def log_part(fmt: String, args: Bits*) = log_raw(log_prefix, fmt, "", timer +: state +: args:_*)
+      def log_part(fmt: String, args: Bits*) = log_raw(log_prefix, fmt, "", timer +: bankid.U +: state +: args:_*)
       /** Log with nothing added */
       def log_plain(fmt: String, args: Bits*) = log_raw("", fmt, "", args:_*)
 
@@ -145,7 +176,6 @@ with HasControlPlaneParameters
 
       val in_opcode = in.a.bits.opcode
       val in_dsid = in.a.bits.dsid
-      val in_instret = in.a.bits.instret
       val in_addr = in.a.bits.address
       val in_id   = in.a.bits.source
       val in_len_shift = in.a.bits.size >= innerBeatBits.U
@@ -166,7 +196,6 @@ with HasControlPlaneParameters
       val id = Reg(UInt(innerIdWidth.W))
       val opcode = Reg(UInt(3.W))
       val dsid = RegInit(((1 << dsidWidth) - 1).U(dsidWidth.W))
-      val instret = Reg(UInt(64.W))
       val size_reg = Reg(UInt(width=in.a.bits.params.sizeBits))
       
       val ren = RegInit(N)
@@ -196,7 +225,6 @@ with HasControlPlaneParameters
           id := in_id
           opcode := in_opcode
           dsid := in_dsid
-          instret := in_instret
           size_reg := in.a.bits.size
 
           // gather_curr_beat_reg := start_beat
@@ -212,7 +240,6 @@ with HasControlPlaneParameters
           id := in_id
           opcode := in_opcode
           dsid := in_dsid
-          instret := in_instret
           size_reg := in.a.bits.size
 
           // gather_curr_beat_reg := start_beat
@@ -282,6 +309,7 @@ with HasControlPlaneParameters
       )
 
       val idx = addr(indexMSB, indexLSB)
+      val bank = addr(bankMSB, bankLSB)
 
       val meta_array_wen = rst || state === s_tag_read
       val read_tag_req = (state === s_tag_read_req)
@@ -333,7 +361,7 @@ with HasControlPlaneParameters
       (0 until nWays).foreach(i => when (tag_match_way(i)) { hit_way := Bits(i) })
 
       cp.dsid := dsid
-      val curr_mask = cp.waymask
+      val curr_mask = cp.waymask //0xFFFF.U
       val repl_way = Mux((curr_state_reg & curr_mask).orR, PriorityEncoder(curr_state_reg & curr_mask),
         Mux(curr_mask.orR, PriorityEncoder(curr_mask), UInt(0)))
       val repl_dsid = set_dsids_reg(repl_way)
@@ -350,7 +378,7 @@ with HasControlPlaneParameters
       // valid and dirty
       val need_writeback = vb_rdata_reg(repl_way) && db_rdata_reg(repl_way)
       val writeback_tag = tag_rdata_reg(repl_way)
-      val writeback_addr = Cat(writeback_tag, Cat(idx, 0.U(blockOffsetBits.W)))
+      val writeback_addr = Cat(writeback_tag, Cat(idx, Cat(bank, 0.U(blockOffsetBits.W))))
 
       val read_miss_writeback = read_miss && need_writeback
       val read_miss_no_writeback = read_miss && !need_writeback
@@ -557,7 +585,7 @@ with HasControlPlaneParameters
       // external memory bus width is 32/64/128bits
       // so each memport read/write is mapped into a whole tilelink bus width read/write
       val axi4_size = log2Up(outerBeatBytes).U
-      val mem_addr = Cat(addr(tagMSB, indexLSB), 0.asUInt(blockOffsetBits.W))
+      val mem_addr = Cat(addr(tagMSB, bankLSB), 0.asUInt(blockOffsetBits.W))
 
       val out_raddr_fire = out.a.fire()
       val out_waddr_fire = out.a.fire()
@@ -618,7 +646,6 @@ with HasControlPlaneParameters
 
       out.a.bits.opcode  := out_opcode
       out.a.bits.dsid    := dsid
-      out.a.bits.instret := instret
       out.a.bits.param   := UInt(0)
       out.a.bits.size    := outerBurstLen.U
       out.a.bits.source  := 0.asUInt(outerIdWidth.W)
@@ -679,10 +706,10 @@ with HasControlPlaneParameters
 
 object TLSimpleL2Cache
 {
-  def apply()(implicit p: Parameters): TLNode =
+  def apply(bankid: Int)(implicit p: Parameters): TLNode =
   {
     if (p(NL2CacheCapacity) != 0) {
-      val tlsimpleL2cache = LazyModule(new TLSimpleL2Cache(TLL2CacheParams()))
+      val tlsimpleL2cache = LazyModule(new TLSimpleL2Cache(bankid, TLL2CacheParams()))
       tlsimpleL2cache.node
     }
     else {
@@ -694,8 +721,8 @@ object TLSimpleL2Cache
 
 object TLSimpleL2CacheRef
 {
-  def apply()(implicit p: Parameters): TLSimpleL2Cache = {
-    val tlsimpleL2cache = LazyModule(new TLSimpleL2Cache(TLL2CacheParams()))
+  def apply(bankid: Int)(implicit p: Parameters): TLSimpleL2Cache = {
+    val tlsimpleL2cache = LazyModule(new TLSimpleL2Cache(bankid, TLL2CacheParams()))
     tlsimpleL2cache
   }
 }

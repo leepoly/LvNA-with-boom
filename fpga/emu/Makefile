@@ -4,7 +4,7 @@ fpga_script_dir = $(fpga_dir)/scripts
 build_dir = $(fpga_dir)/build
 generated_dir = $(build_dir)/generated-src
 
-CONFIG ?= LvNAConfigemu
+CONFIG ?= LvNABoomLinuxConfig
 
 -include $(base_dir)/Makefrag
 
