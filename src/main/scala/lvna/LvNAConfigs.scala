@@ -77,7 +77,7 @@ class LvNABoomFPGAConfigzcu102 extends Config(
   ++ new WithNL2CacheCapacity(2048)
   ++ new WithNBanksPerMemChannel(4)
   ++ new WithBoom
-  ++ new WithNBoomCores(1)
+  ++ new WithNBoomCores(2)
   ++ new WithRationalRocketTiles
   ++ new WithTimebase(BigInt(10000000)) // 10 MHz
   ++ new WithExtMemSize(0x80000000L)

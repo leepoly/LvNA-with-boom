@@ -3,7 +3,8 @@ ifndef RISCV
 $(error Please set environment variable RISCV. Please take a look at README)
 endif
 
-MODEL ?= TestHarness
+# MODEL ?= TestHarness
+MODEL ?= BoomTestHarness
 PROJECT ?= freechips.rocketchip.system
 CFG_PROJECT ?= $(PROJECT)
 CONFIG ?= DefaultConfig
