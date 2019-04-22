@@ -42,7 +42,7 @@ class LvNABoomTestConfig extends Config(
   new WithRVC
     ++ new WithSmallBooms
     ++ new DefaultBoomConfig
-    ++ new WithNBoomCores(1)
+    ++ new WithNBoomCores(2)
     ++ new WithNBanksPerMemChannel(4)
     ++ new WithNL2CacheCapacity(256)
     ++ new WithEmu

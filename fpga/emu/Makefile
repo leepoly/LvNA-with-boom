@@ -36,7 +36,7 @@ DEBUG_ARGS = +jtag_rbb_enable=1 -r 4040
 endif
 
 run-emu: $(emu) $(emu_bin_hex_file)
-	cd $(dir $(emu)) && $< $(DEBUG_ARGS) +verbose . 3>&1 1>&2 2>&3 | spike-dasm > $(dir $(emu))/emu.log
+	cd $(dir $(emu)) && $< $(DEBUG_ARGS) --seed=1555632678 +verbose . 3>&1 1>&2 2>&3 | spike-dasm > $(dir $(emu))/emu.log
 
 emu-clean:
 	-rm $(emu)
