@@ -31,7 +31,6 @@ case class BankedL2Params(
     ww.node :*= bh.node
     (bh.node, ww.node, () => None)
   }) {
-  println(s"nBanks=$nMemoryChannels * $nBanksPerChannel")
   val nBanks = nMemoryChannels*nBanksPerChannel
 }
 
