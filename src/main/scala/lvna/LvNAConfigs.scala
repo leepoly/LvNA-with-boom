@@ -27,7 +27,7 @@ class LvNABoomLinuxConfig extends Config(
     ++ new DefaultBoomConfig
     ++ new WithNBoomCores(1)
     ++ new WithNBanksPerMemChannel(4)
-    ++ new WithNL2CacheCapacity(256)
+    ++ new WithNL2CacheCapacity(64)
     ++ new WithEmu
     ++ new WithBoom
     ++ new WithRationalRocketTiles
