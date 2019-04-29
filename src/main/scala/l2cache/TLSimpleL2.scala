@@ -101,6 +101,7 @@ class L2MSHR(params: TLBundleParameters, dsidWidth: Int) extends Module with L2C
     val replay_req = Output(new L2CacheReq(params, dsidWidth))
     val replay_ready = Input(Bool())
 
+    val is_queue_full = Output(Bool())
     // val rst = Input(Bool()) //clear mshr entry valid bit
   }
   val outerBeatSize = params.dataBits
@@ -130,6 +131,7 @@ class L2MSHR(params: TLBundleParameters, dsidWidth: Int) extends Module with L2C
   mshr_file.io.enq.bits := mshr_file_enq.bits
   mshr_file.io.enq.valid := mshr_file_enq.valid
   mshr_file_enq.ready := mshr_file.io.enq.ready
+  io.is_queue_full := !mshr_file_enq.ready
   when (mshr_file.io.enq.valid && mshr_file.io.enq.ready) {
     printf("[mshr-add-entry]: cycle: %d addr %x\n", GTimer(), mshr_file_enq.bits.req.address)
   }
@@ -447,15 +449,15 @@ class TLCacheConvertorOut(params: TLBundleParameters, dsidWidth: Int, L2param: T
   val wb_addr_buf = Reg(UInt(width = params.addressBits.W))
   val wb_data_buf = Reg(Vec(blockSize / params.dataBits, UInt(params.dataBits.W)))
 
-  when (GTimer() % 10000.U === 0.U) {
-    printf("[out-report] cycle: %d, outstate %x, wb_state %x, wb_addr %x, wb_data %x rf_state %x, rf_addr%x %x\n",
-        GTimer(), debug_out_state,
-        wb_state,
-        io.wb_addr,
-        io.wb_data.asUInt,
-        rf_state, io.rf_addr_valid, io.rf_addr
-        )
-  }
+  // when (GTimer() % 10000.U === 0.U) {
+  //   printf("[out-report] cycle: %d, outstate %x, wb_state %x, wb_addr %x, wb_data %x rf_state %x, rf_addr%x %x\n",
+  //       GTimer(), debug_out_state,
+  //       wb_state,
+  //       io.wb_addr,
+  //       io.wb_data.asUInt,
+  //       rf_state, io.rf_addr_valid, io.rf_addr
+  //       )
+  // }
 
   when (wb_state === wb_idle && rf_state === rf_idle && io.wb_valid) {
     wb_state := wb_do_ram_write
@@ -555,8 +557,8 @@ with HasControlPlaneParameters
     println(s"bankid=$bankid")
     val nWays = p(NL2CacheWays)
     println(s"nWays = $nWays")
-    //val nBanks = p(NBanksPerMemChannel)
-    val nSets = p(NL2CacheCapacity) * 1024 / 64 / nWays // / nBanks
+    val nBanks = p(NBanksPerMemChannel)
+    val nSets = p(NL2CacheCapacity) * 1024 / 64 / nWays / nBanks
     println(s"nSets = $nSets")
     val cp = IO(new CPToL2CacheIO().flip())
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
@@ -594,13 +596,13 @@ with HasControlPlaneParameters
 
       val indexBits = log2Ceil(nSets)
       val blockOffsetBits = log2Ceil(blockBytes)
-      //val bankBits = log2Ceil(nBanks)
-      val tagBits = addrWidth - indexBits - blockOffsetBits // - bankBits
+      val bankBits = log2Ceil(nBanks)
+      val tagBits = addrWidth - indexBits - blockOffsetBits - bankBits
       val offsetLSB = 0
       val offsetMSB = blockOffsetBits - 1
-      //val bankLSB = offsetMSB + 1
-      //val bankMSB = bankLSB + bankBits - 1
-      val indexLSB = offsetMSB + 1 //bankMSB + 1 
+      val bankLSB = offsetMSB + 1
+      val bankMSB = bankLSB + bankBits - 1
+      val indexLSB = bankMSB + 1 // offsetMSB + 1 
       val indexMSB = indexLSB + indexBits - 1
       val tagLSB = indexMSB + 1
       val tagMSB = tagLSB + tagBits - 1
@@ -640,15 +642,16 @@ with HasControlPlaneParameters
       val s2_decode = Reg(new L2CacheDecodeInfo(nWays, addrWidth))
       val cache_s3 = Reg(new L2CacheReq(edgeIn.bundle, dsidWidth))
       val s3_decode = Reg(new L2CacheDecodeInfo(nWays, addrWidth))
-      val s1_valid = TL2CacheInput.io.cache_s0.valid
+      val s0_valid = TL2CacheInput.io.cache_s0.valid
       val s2_ready = s2_state === s2_idle
       val s3_ready = s3_state === s3_idle
-      val s1_ready = !rst && s1_state === s_idle && 
-                      (!mshr.io.replay_valid)
-                      (!(s1_valid && !s2_ready && TL2CacheInput.io.cache_s0.req.address === cache_s2.address/* && op_wen(cache_s2.opcode) && op_ren(TL2CacheInput.io.cache_s0.req.opcode)*/)) &&
-                      (!(s1_valid && !s3_ready && TL2CacheInput.io.cache_s0.req.address === cache_s3.address/* && op_wen(cache_s3.opcode) && op_ren(TL2CacheInput.io.cache_s0.req.opcode)*/))
-      val s1_rawblocking = ((s1_valid && !s2_ready && TL2CacheInput.io.cache_s0.req.address === cache_s2.address/* && op_wen(cache_s2.opcode) && op_ren(TL2CacheInput.io.cache_s0.req.opcode)*/)) ||
-                      ((s1_valid && !s3_ready && TL2CacheInput.io.cache_s0.req.address === cache_s3.address/* && op_wen(cache_s3.opcode) && op_ren(TL2CacheInput.io.cache_s0.req.opcode)*/))
+      val s1_ready = !rst && s1_state === s_idle
+                      //  && 
+                      // (!mshr.io.replay_valid)
+                      // (!(s0_valid && !s2_ready && TL2CacheInput.io.cache_s0.req.address === cache_s2.address/* && op_wen(cache_s2.opcode) && op_ren(TL2CacheInput.io.cache_s0.req.opcode)*/)) &&
+                      // (!(s0_valid && !s3_ready && TL2CacheInput.io.cache_s0.req.address === cache_s3.address/* && op_wen(cache_s3.opcode) && op_ren(TL2CacheInput.io.cache_s0.req.opcode)*/))
+      // val s1_rawblocking = ((s0_valid && !s2_ready && TL2CacheInput.io.cache_s0.req.address === cache_s2.address/* && op_wen(cache_s2.opcode) && op_ren(TL2CacheInput.io.cache_s0.req.opcode)*/)) ||
+      //                 ((s0_valid && !s3_ready && TL2CacheInput.io.cache_s0.req.address === cache_s3.address/* && op_wen(cache_s3.opcode) && op_ren(TL2CacheInput.io.cache_s0.req.opcode)*/))
 
       val s3_ren = cache_s3.opcode === TLMessages.Get
 
@@ -656,7 +659,7 @@ with HasControlPlaneParameters
       val s1_wen = s1_in.opcode === TLMessages.PutFullData || s1_in.opcode === TLMessages.PutPartialData
       
       val s1_idx = s1_in.address(indexMSB, indexLSB)
-      //val s1_bank = s1_in.address(bankMSB, bankLSB)
+      val s1_bank = s1_in.address(bankMSB, bankLSB)
 
       TL2CacheInput.io.tl_in_a.bits := in.a.bits
       TL2CacheInput.io.tl_in_a_valid := in.a.valid
@@ -666,8 +669,34 @@ with HasControlPlaneParameters
       in.d.valid := TL2CacheInput.io.tl_in_d_valid
       TL2CacheInput.io.tl_in_d_ready := in.d.ready
       
+      //Blocking Rules: we have 
+      // 1) set-blocking: no set conflict between req & s1/s2/s3_req
+      // 2) mshr-blocking: when mshr is full
+      // 3) mshr-add-entry-blocking: when mshr is full
+      // other blocking implementation(wb_blocking, raw_blocking that I wrote here) is obsolete and useless, I think.
+
+      // 1) + 2) is blocking s0_req: set_blocking, mshr_blocking
+      // 3) is blocking adding entry from s3 req
+      val s0_set = decode_idx(TL2CacheInput.io.cache_s0.req.address)
+      val s1_set = decode_idx(s1_in.address)
+      val s2_set = decode_idx(cache_s2.address)
+      val s3_set = decode_idx(cache_s3.address)
+      val set_blocking1 = (!s1_ready) && (s1_set === s0_set)
+      val set_blocking2 = (!s2_ready) && (s2_set === s0_set)
+      val set_blocking3 = (!s3_ready) && (s3_set === s0_set)
+      val set_blocking = set_blocking1 || set_blocking2 || set_blocking3
+
+      val replay_set = decode_idx(mshr.io.replay_req.address)
+      val replay_set_blocking1 = (!s1_ready) && (s1_set === replay_set)
+      val replay_set_blocking2 = (!s2_ready) && (s2_set === replay_set)
+      val replay_set_blocking3 = (!s3_ready) && (s3_set === replay_set)
+      val replay_set_blocking = replay_set_blocking1 || replay_set_blocking2 || replay_set_blocking3
+
+      val mshr_blocking = mshr.io.is_queue_full
+
       TL2CacheInput.io.cache_rst := rst
-      TL2CacheInput.io.cache_s0.ready := s1_ready
+      TL2CacheInput.io.cache_s0.ready := s1_ready && (!mshr.io.replay_valid) && 
+                                          (!set_blocking) && (!mshr_blocking)
 
       val timer = GTimer()
       val log_prefix = "cycle: %d bankid: %d [L2Cache]s1 %d s2 %d s3 %d s1_addr %x s2_addr %x s3_addr %x "
@@ -697,27 +726,36 @@ with HasControlPlaneParameters
       // }
 
       mshr.io.replay_ready := !rst && s1_state === s1_idle
+      
       when (mshr.io.replay_ready && mshr.io.replay_valid) {
         s1_in := mshr.io.replay_req
         s1_state := s1_tag_read_req
       }
-      .elsewhen (s1_valid && s1_ready) {
-        s1_in := TL2CacheInput.io.cache_s0.req
-        s1_state := s1_tag_read_req
+      .elsewhen (s0_valid && s1_ready) {
+        when (set_blocking) {
+          log("set_blocking s0_addr %x", TL2CacheInput.io.cache_s0.req.address)
+        }
+        when (mshr_blocking) {
+          log("mshr_blocking")
+        }
+        when (!set_blocking && !mshr_blocking) {
+          s1_in := TL2CacheInput.io.cache_s0.req
+          s1_state := s1_tag_read_req
+        }
       }
 
-      when ((s1_ready && s1_valid)) {
+      when ((s1_ready && s0_valid)) {
         val wire_opcode = TL2CacheInput.io.cache_s0.req.opcode
         val wire_ren = wire_opcode === TLMessages.Get
         val wire_wen = wire_opcode === TLMessages.PutFullData || wire_opcode === TLMessages.PutPartialData
-        log("[s0] opcode %x, dsid %x, address %x, mask %x, data %x, ren%x/wen%x s1_valid%x s1_ready%x replay%x",
+        log("[s0] opcode %x, dsid %x, address %x, mask %x, data %x, ren%x/wen%x s0_valid%x s1_ready%x replay%x",
           TL2CacheInput.io.cache_s0.req.opcode,
           TL2CacheInput.io.cache_s0.req.dsid,
           TL2CacheInput.io.cache_s0.req.address,
           TL2CacheInput.io.cache_s0.req.mask.asUInt,
           TL2CacheInput.io.cache_s0.req.data.asUInt,
           wire_ren, wire_wen,
-          s1_valid,
+          s0_valid,
           s1_ready,
           TL2CacheInput.io.cache_s0.req.is_replay
           )
@@ -727,14 +765,14 @@ with HasControlPlaneParameters
         val wire_opcode = mshr.io.replay_req.opcode
         val wire_ren = wire_opcode === TLMessages.Get
         val wire_wen = wire_opcode === TLMessages.PutFullData || wire_opcode === TLMessages.PutPartialData
-        log("[s0] opcode %x, dsid %x, address %x, mask %x, data %x, ren%x/wen%x s1_valid%x s1_ready%x replay%x",
+        log("[s0] opcode %x, dsid %x, address %x, mask %x, data %x, ren%x/wen%x s0_valid%x s1_ready%x replay%x",
           mshr.io.replay_req.opcode,
           mshr.io.replay_req.dsid,
           mshr.io.replay_req.address,
           mshr.io.replay_req.mask.asUInt,
           mshr.io.replay_req.data.asUInt,
           wire_ren, wire_wen,
-          s1_valid,
+          s0_valid,
           s1_ready,
           mshr.io.replay_req.is_replay
           )
@@ -810,8 +848,8 @@ with HasControlPlaneParameters
       // valid and dirty
       val need_writeback = vb_rdata_reg(s1_decode.repl_way_reg) && db_rdata_reg(s1_decode.repl_way_reg)
       val writeback_tag = tag_rdata_reg(s1_decode.repl_way_reg)
-      s1_decode.writeback_addr_reg := Cat(writeback_tag, Cat(s1_idx, 0.U(blockOffsetBits.W)))
-      //s1_decode.writeback_addr_reg := Cat(writeback_tag, Cat(s1_idx, Cat(s1_bank, 0.U(blockOffsetBits.W))))
+      //s1_decode.writeback_addr_reg := Cat(writeback_tag, Cat(s1_idx, 0.U(blockOffsetBits.W)))
+      s1_decode.writeback_addr_reg := Cat(writeback_tag, Cat(s1_idx, Cat(s1_bank, 0.U(blockOffsetBits.W))))
 
       val s1_replay_read = s1_ren && s1_in.is_replay
       val s1_replay_write = s1_wen && s1_in.is_replay
@@ -1092,8 +1130,8 @@ with HasControlPlaneParameters
         s3_state := s3_idle
       }
 
-      val rf_mem_addr = Cat(mshr.io.rf_addr(tagMSB, indexLSB), 0.asUInt(blockOffsetBits.W))
-      //val rf_mem_addr = Cat(mshr.io.rf_addr(tagMSB, bankLSB), 0.asUInt(blockOffsetBits.W))
+      //val rf_mem_addr = Cat(mshr.io.rf_addr(tagMSB, indexLSB), 0.asUInt(blockOffsetBits.W))
+      val rf_mem_addr = Cat(mshr.io.rf_addr(tagMSB, bankLSB), 0.asUInt(blockOffsetBits.W))
       TL2CacheOutput.io.rf_addr := rf_mem_addr
       TL2CacheOutput.io.rf_addr_valid := mshr.io.rf_addr_valid
       TL2CacheOutput.io.rf_data_mask := edgeOut.mask(rf_mem_addr, outerBurstLen.U)
