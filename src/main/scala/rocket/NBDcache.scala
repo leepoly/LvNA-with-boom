@@ -646,7 +646,7 @@ class DataArray(implicit p: Parameters) extends L1HellaCacheModule()(p) {
         )
         when (wway_en.orR && io.write.valid && io.write.bits.wmask(i)) {
           val data = Vec.fill(rowWords)(io.write.bits.data(encDataBits*(i+1)-1,encDataBits*i))
-          array.write(waddr, data, wway_en.toBools)
+          array.write(waddr, data, wway_en.asBools)
         }
         resp(i) := array.read(raddr, rway_en.orR && io.read.valid).asUInt
       }
@@ -668,7 +668,7 @@ class DataArray(implicit p: Parameters) extends L1HellaCacheModule()(p) {
       )
       when (io.write.bits.way_en(w) && io.write.valid) {
         val data = Vec.tabulate(rowWords)(i => io.write.bits.data(encDataBits*(i+1)-1,encDataBits*i))
-        array.write(waddr, data, io.write.bits.wmask.toBools)
+        array.write(waddr, data, io.write.bits.wmask.asBools)
       }
       io.resp(w) := array.read(raddr, io.read.bits.way_en(w) && io.read.valid).asUInt
     }
@@ -1056,6 +1056,7 @@ class NonBlockingDCacheModule(outer: NonBlockingDCache) extends HellaCacheModule
   io.cpu.resp.bits.data_raw := s2_data_word
   io.cpu.ordered := mshrs.io.fence_rdy && !s1_valid && !s2_valid
   io.cpu.replay_next := (s1_replay && s1_read) || mshrs.io.replay_next
+  io.cpu.s2_primary_miss := s2_valid_masked && !s2_hit && (isRead(s2_req.cmd) || isWrite(s2_req.cmd))
 
   if (DEBUG_DCACHE) {
     when (io.cpu.resp.valid) {
